@@ -6,6 +6,7 @@ grouped	   WC_Product_Grouped	   multiple children
 external	WC_Product_External	      no cart → redirects
 subscription	(plugin)	          recurring logic
 
+
 <?php
 /**
  * Plugin Name: My WC Debug
