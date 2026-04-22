@@ -145,3 +145,167 @@ add_action('woocommerce_before_calculate_totals', function ($cart) {
 // Store API Controller
 //    ↓
 // Order created
+
+// Rest API approach means we need to capture data early (before order is created) 
+// and store it in order meta, then use it in final processing. 
+// We can also add validation in the validation hook, but we can’t rely on 
+// request data in the final order hook, so we must capture it early.
+
+/**
+ * Logger
+ */
+function bcl_log( $message ) {
+    if ( is_array( $message ) || is_object( $message ) ) {
+        error_log( print_r( $message, true ) );
+    } else {
+        error_log( $message );
+    }
+}
+
+/**
+ * 1. VALIDATION (always has request)
+ */
+add_action(
+    'woocommerce_store_api_checkout_validate_order',
+    function ( $request ) {
+
+        $data = $request->get_params();
+        $payment = $data['payment_method'] ?? '';
+
+        if ( $payment === 'cod' ) {
+            throw new \WC_REST_Exception(
+                'cod_disabled',
+                'COD disabled (REST)',
+                400
+            );
+        }
+
+    },
+    10,
+    1
+);
+
+
+/**
+ * 2. CAPTURE REQUEST DATA EARLY (IMPORTANT)
+ */
+add_action(
+    'woocommerce_store_api_checkout_update_order_meta',
+    function ( $order, $request = null ) {
+
+        // Always log once for debugging
+        bcl_log('=== META HOOK ===');
+
+        // Set source only once
+        if ( ! $order->get_meta('_custom_source') ) {
+            $order->update_meta_data('_custom_source', 'block_checkout_rest');
+        }
+
+        // Capture request data WHEN AVAILABLE (even in draft)
+        if ( $request && ! $order->get_meta('_captured_payment_method') ) {
+
+            $data = $request->get_params();
+
+            $payment = $data['extensions'] ?? '';
+
+            bcl_log('Captured from request: ' . $payment);
+
+            $order->update_meta_data('_captured_payment_method', $payment);
+        }
+
+    },
+    10,
+    2
+);
+
+
+/**
+ * 3. FINAL ORDER LOGIC (NO REQUEST RELIANCE)
+ */
+add_action(
+    'woocommerce_store_api_checkout_order_processed',
+    function ( $order ) {
+
+        // Avoid running twice
+        if ( $order->get_meta('_bcl_processed') ) {
+            return;
+        }
+
+        // Mark as processed
+        $order->update_meta_data('_bcl_processed', 'yes');
+        $order->save();
+
+        bcl_log('=== FINAL ORDER ONLY ===');
+        bcl_log('Order ID: ' . $order->get_id());
+        bcl_log('Status: ' . $order->get_status());
+
+        // Use captured data instead of request
+        $payment = $order->get_meta('_captured_payment_method');
+
+        bcl_log('Captured Payment: ' . $payment);
+
+    },
+    10,
+    1
+);
+
+
+/**
+ * 4. GLOBAL FALLBACK (optional)
+ */
+add_action(
+    'woocommerce_new_order',
+    function ( $order_id ) {
+
+        bcl_log('=== ORDER CREATED (GLOBAL) === ID: ' . $order_id);
+
+    }
+);
+
+
+/**
+ * 5. CART DEBUG (safe)
+ */
+add_action(
+    'woocommerce_store_api_cart_update_customer_from_request',
+    function ( $customer, $request = null ) {
+
+        if ( ! $request ) return;
+
+        bcl_log('=== CART UPDATED ===');
+        bcl_log( $request->get_params() );
+
+    },
+    10,
+    2
+);
+
+
+/**
+ * 6. EXTEND SCHEMA
+ */
+add_filter(
+    'woocommerce_store_api_checkout_schema',
+    function ( $schema ) {
+
+        $schema['properties']['extensions']['properties']['bcl'] = [
+            'type'       => 'object',
+            'properties' => [
+                'custom_note' => [
+                    'type' => 'string',
+                ],
+            ],
+        ];
+
+        return $schema;
+    }
+);
+
+// [22-Apr-2026 07:11:44 UTC] === META HOOK ===
+// [22-Apr-2026 07:11:51 UTC] === META HOOK ===
+// [22-Apr-2026 07:12:04 UTC] === META HOOK ===
+// [22-Apr-2026 07:12:04 UTC] === ORDER CREATED (GLOBAL) === ID: 82
+// [22-Apr-2026 07:12:04 UTC] === FINAL ORDER ONLY ===
+// [22-Apr-2026 07:12:04 UTC] Order ID: 82
+// [22-Apr-2026 07:12:04 UTC] Status: pending
+// [22-Apr-2026 07:12:04 UTC] Captured Payment: COD
