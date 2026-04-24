@@ -43,27 +43,37 @@ add_action('woocommerce_calculate_totals', function($cart) {
 The woocommerce_calc_discounts_sequentially option changes whether percentage coupons run before or after fixed ones.
 
 // programmatic way of coupon application
-add_action('woocommerce_before_calculate_totals', function($cart) {
-    if (is_admin() && !defined('DOING_AJAX')) return;
+// Step 1: Suppress "does not exist" error for our virtual coupon
+add_filter('woocommerce_coupon_error', function($err, $err_code, $coupon) {
+    if ($err_code === 100 && strtolower($coupon->get_code()) === 'virtual10') {
+        return '';
+    }
+    return $err;
+}, 10, 3);
 
-    // Apply a "virtual" coupon that doesn't exist in the DB
-    // Done via filter, not apply_coupon()
-});
+// Step 2: Tell WooCommerce the coupon is valid
+add_filter('woocommerce_coupon_is_valid', function($valid, $coupon) {
+    if (strtolower($coupon->get_code()) === 'virtual10') {
+        return true;
+    }
+    return $valid;
+}, 10, 2);
 
+// Step 3: Provide the coupon data
 add_filter('woocommerce_get_shop_coupon_data', function($data, $code, $coupon) {
-    if ($code !== 'VIRTUAL10') return $data;
+    if (strtolower($code) !== 'virtual10') return $data;
 
     return [
-        'discount_type' => 'percent',
-        'coupon_amount' => 10,
-        'individual_use' => false,
-        'product_ids'   => [],
+        'discount_type'       => 'percent',
+        'coupon_amount'       => 10,
+        'individual_use'      => false,
+        'product_ids'         => [],
         'exclude_product_ids' => [],
-        'usage_limit'   => '',
-        'usage_count'   => 0,
-        'expiry_date'   => '',
-        'free_shipping' => false,
-        'minimum_amount'=> '',
+        'usage_limit'         => '',
+        'usage_count'         => 0,
+        'expiry_date'         => '',
+        'free_shipping'       => false,
+        'minimum_amount'      => '',
     ];
 }, 10, 3);
 
